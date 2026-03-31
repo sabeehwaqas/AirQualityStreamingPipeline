@@ -1,0 +1,37 @@
+# mysimbdp Service Agreement - TenantA
+# Platform provider enforces these constraints before running silverpipeline.
+# Tenant: TenantA (air quality sensor data - flat schema, analytics-heavy)
+
+tenant_id: "tenantA"
+pipeline_script: "silverpipeline_tenantA.py"
+
+scheduling:
+  interval_minutes: 5 # how often batchmanager runs this pipeline
+  max_runtime_seconds: 120 # kill pipeline if it exceeds this
+
+data_limits:
+  max_records_per_run: 5000 # max bronze records extracted in one run
+  max_file_size_mb: 50 # max size of a single cache file
+  max_cache_files_pending: 20 # if more than this many files are pending, skip run and alert
+
+silver_table:
+  keyspace: "tenantA_silver"
+  table: "air_quality"
+
+caching:
+  base_dir: "/app/cache/tenantA"
+  pending_dir: "/app/cache/tenantA/pending"
+  processed_dir: "/app/cache/tenantA/processed"
+
+transformation:
+  # TenantA wants numeric fields cast and a derived AQI bucket
+  cast_numeric: ["pm10_P1", "pm2_5_P2", "lat", "lon", "alt"]
+  derived_fields:
+    - name: "aqi_bucket"
+      rule: "pm2_5_P2_bucket" # platform maps this to a known transform fn
+
+# Constraints that will BLOCK the run if violated
+constraints:
+  require_non_empty_bronze: true
+  reject_if_pending_overflow: true # pending_dir > max_cache_files_pending
+  reject_if_silver_table_missing: true

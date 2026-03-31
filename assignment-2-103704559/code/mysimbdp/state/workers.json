@@ -1,0 +1,27 @@
+{
+  "workers": {
+    "tenantA": {
+      "tenantA-worker": {
+        "container_name": "streamingestworker-tenantA",
+        "container_id": "0da97362cb6c0829b2f3b00388d31eb6d4786026bd7b00324e29faf08279490a",
+        "status": "running",
+        "started_at": 1774737388,
+        "kafka": "broker:29092",
+        "cassandra": "cassandra",
+        "monitor_url": "http://streamingestmonitor:8002"
+      }
+    },
+    "tenantB": {
+      "tenantB-worker": {
+        "container_name": "streamingestworker-tenantB",
+        "container_id": "66c573cee4521a8e1e80141205643dbd48ff604179025297f677dbeee399bb4b",
+        "status": "running",
+        "started_at": 1774737388,
+        "kafka": "broker:29092",
+        "cassandra": "cassandra",
+        "monitor_url": "http://streamingestmonitor:8002"
+      }
+    }
+  },
+  "alerts": []
+}

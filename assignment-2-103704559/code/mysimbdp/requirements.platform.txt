@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+docker
+confluent-kafka
+cassandra-driver
+requests
+pyyaml
+apscheduler
+google-cloud-storage

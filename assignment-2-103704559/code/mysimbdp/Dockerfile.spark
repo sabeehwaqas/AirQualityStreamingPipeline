@@ -1,0 +1,24 @@
+# =============================================================================
+# Dockerfile.spark  —  PySpark Streaming Container for mysimbdp Assignment 3
+# =============================================================================
+# Based on official apache/spark image (bitnami/spark:3.5 no longer available).
+# Spark home is /opt/spark. Python is pre-installed as python3.
+# =============================================================================
+
+FROM apache/spark:3.5.5-scala2.12-java17-python3-ubuntu
+
+USER root
+
+# Install Python deps for the streaming app
+COPY requirements.spark.txt /tmp/requirements.spark.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.spark.txt
+
+# Copy the streaming app
+COPY streaming/streamanalyticsapp.py /app/streamanalyticsapp.py
+
+# Create checkpoint dir
+RUN mkdir -p /tmp/spark-checkpoint/streamanalyticsapp && \
+    chmod -R 777 /tmp/spark-checkpoint
+
+# spark-submit lives at /opt/spark/bin/spark-submit in this image
+ENV PATH="/opt/spark/bin:$PATH"

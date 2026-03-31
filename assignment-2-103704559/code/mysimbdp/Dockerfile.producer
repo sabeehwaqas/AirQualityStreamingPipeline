@@ -1,0 +1,21 @@
+# =============================================================================
+# Dockerfile.producer  —  TenantA Kafka Producer Container
+# =============================================================================
+# Wraps the existing tenantA_producer.py in a container so it runs inside
+# the Docker Compose network alongside Kafka (uses broker:29092 internally).
+# =============================================================================
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.platform.txt /app/requirements.platform.txt
+RUN pip install --no-cache-dir -r /app/requirements.platform.txt
+
+# Copy the existing producer (no changes needed to the producer itself)
+COPY tenants/tenantA/tenantA_producer.py /app/tenantA_producer.py
+
+CMD ["python", "tenantA_producer.py"]

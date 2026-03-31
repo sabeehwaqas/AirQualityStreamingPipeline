@@ -1,0 +1,38 @@
+# =============================================================================
+# Dockerfile.platform  —  mysimbdp Platform Docker Image (Assignment 3)
+# =============================================================================
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.platform.txt /app/requirements.platform.txt
+RUN pip install --no-cache-dir -r /app/requirements.platform.txt
+
+# ── Assignment 2 platform services ───────────────────────────────────────────
+COPY platform/streamingestmanager.py  /app/streamingestmanager.py
+COPY platform/streamingestmonitor.py  /app/streamingestmonitor.py
+COPY platform/batchmanager.py         /app/batchmanager.py
+
+# ── Assignment 2 tenant files ─────────────────────────────────────────────────
+COPY tenants/tenantA/streamingestworker.py      /app/streamingestworker.py
+COPY tenants/tenantA/silverpipeline_tenantA.py  /app/silverpipeline_tenantA.py
+COPY tenants/tenantB/silverpipeline_tenantB.py  /app/silverpipeline_tenantB.py
+COPY tenants/tenantA/tenantA.yaml  /app/tenant_configs/tenantA.yaml
+COPY tenants/tenantB/tenantB.yaml  /app/tenant_configs/tenantB.yaml
+
+# ── Assignment 3 — alert consumer ─────────────────────────────────────────────
+# File lives in tenants/tenantA/alert_consumer.py in the repo
+COPY tenants/tenantA/alert_consumer.py  /app/alert_consumer.py
+
+RUN mkdir -p /app/state /app/logs \
+             /app/cache/tenantA/pending \
+             /app/cache/tenantA/processed \
+             /app/cache/tenantB/pending \
+             /app/cache/tenantB/processed
+
+EXPOSE 8001 8002 8003

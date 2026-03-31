@@ -1,0 +1,242 @@
+# =============================================================================
+# docker-compose.yaml  —  mysimbdp Assignment 2 + 3
+# =============================================================================
+#
+# HOW TO RUN FROM SCRATCH:
+#   docker compose down -v
+#   docker rmi mysimbdp-platform:latest 2>/dev/null || true
+#   ./bootstrap.sh
+#
+# KEY DESIGN:
+#   - Only streamingestmanager BUILDS mysimbdp-platform:latest
+#   - All other platform services just USE the image (no build: block)
+#   - This prevents the Docker BuildKit race condition
+#
+# TUNING (Part 2 Q3 — window parameters):
+#   Edit WINDOW_DURATION / WINDOW_SLIDE under spark-streaming, then:
+#   docker compose restart spark-streaming
+#
+# TUNING (Part 2 Q5 — parallelism):
+#   Edit --master local[N] and SPARK_SHUFFLE_PARTITIONS, then:
+#   docker compose restart spark-streaming
+# =============================================================================
+
+services:
+
+  # ── Kafka ──────────────────────────────────────────────────────────────────
+  broker:
+    image: apache/kafka:3.7.2
+    container_name: broker
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 6
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
+  # ── Cassandra ──────────────────────────────────────────────────────────────
+  cassandra:
+    image: cassandra:4.1
+    container_name: cassandra
+    ports:
+      - "9042:9042"
+    environment:
+      - CASSANDRA_CLUSTER_NAME=mysimbdp
+      - CASSANDRA_DC=datacenter1
+      - CASSANDRA_RACK=rack1
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' localhost 2>/dev/null | grep -q system"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+
+  # ── CQL utility ────────────────────────────────────────────────────────────
+  cqlsh:
+    image: cassandra:4.1
+    container_name: cqlsh
+    depends_on:
+      - cassandra
+    entrypoint: ["bash", "-lc", "sleep infinity"]
+
+  # ── streamingestmanager — ONLY service that BUILDS the platform image ──────
+  # All other platform services reference image: mysimbdp-platform:latest
+  # and depend_on this service so the image exists before they start.
+  streamingestmanager:
+    build:
+      context: .
+      dockerfile: Dockerfile.platform
+    image: mysimbdp-platform:latest
+    container_name: streamingestmanager
+    depends_on:
+      - broker
+      - cassandra
+    environment:
+      KAFKA_BOOTSTRAP: "broker:29092"
+      CASSANDRA_HOST: "cassandra"
+      MONITOR_URL: "http://streamingestmonitor:8002"
+      REPORT_WINDOW_SEC: "10"
+      MANAGER_NAME: "mysimbdp-streamingestmanager"
+    ports:
+      - "8001:8001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./state:/app/state
+      - ./logs:/app/logs
+    command: ["python", "streamingestmanager.py"]
+
+  # ── streamingestmonitor ────────────────────────────────────────────────────
+  streamingestmonitor:
+    image: mysimbdp-platform:latest
+    container_name: streamingestmonitor
+    depends_on:
+      streamingestmanager:
+        condition: service_started
+      cassandra:
+        condition: service_healthy
+    environment:
+      CASSANDRA_HOST: "cassandra"
+      MONITOR_PORT: "8002"
+      MANAGER_URL: "http://streamingestmanager:8001"
+      MAX_AVG_INGEST_MS: "50"
+      MIN_RECORDS_PER_WINDOW: "1"
+    ports:
+      - "8002:8002"
+    command: ["python", "streamingestmonitor.py"]
+
+  # ── batchmanager ───────────────────────────────────────────────────────────
+  batchmanager:
+    image: mysimbdp-platform:latest
+    container_name: batchmanager
+    depends_on:
+      streamingestmanager:
+        condition: service_started
+      cassandra:
+        condition: service_healthy
+    environment:
+      CASSANDRA_HOST: "cassandra"
+      TENANT_CONFIGS_DIR: "/app/tenant_configs"
+      CACHE_BASE_DIR: "/app/cache"
+      BATCH_MANAGER_PORT: "8003"
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./cache:/app/cache
+      - ./logs:/app/logs
+    command: ["python", "batchmanager.py"]
+
+  # ── TenantA Producer ───────────────────────────────────────────────────────
+  # Polls sensor.community API and publishes to tenantA.bronze.raw
+  # POLL_INTERVAL_SEC controls speed — lower = faster (for speed tests)
+  tenanta-producer:
+    build:
+      context: .
+      dockerfile: Dockerfile.producer
+    container_name: tenanta-producer
+    depends_on:
+      - broker
+    environment:
+      KAFKA_BOOTSTRAP: "broker:29092"
+      POLL_INTERVAL_SEC: "0.5"
+    restart: on-failure
+
+  # ── Spark Master ───────────────────────────────────────────────────────────
+  spark-master:
+    image: apache/spark:3.5.5-scala2.12-java17-python3-ubuntu
+    container_name: spark-master
+    user: root
+    entrypoint: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh && tail -f /opt/spark/logs/*"]
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    depends_on:
+      - broker
+      - cassandra
+
+  # ── Spark Worker ───────────────────────────────────────────────────────────
+  # For Part 2 Q5 parallelism tests scale with:
+  #   docker compose up -d --scale spark-worker=4
+  spark-worker:
+    image: apache/spark:3.5.5-scala2.12-java17-python3-ubuntu
+    container_name: spark-worker
+    user: root
+    entrypoint: ["/bin/bash", "-c", "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f /opt/spark/logs/*"]
+    depends_on:
+      - spark-master
+
+  # ── PySpark Streaming Job ──────────────────────────────────────────────────
+  # Reads tenantA.bronze.raw → windowed analytics → Cassandra + alerts
+  # Edit env vars below to change window/parallelism, then:
+  #   docker compose restart spark-streaming
+  spark-streaming:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+    container_name: spark-streaming
+    depends_on:
+      - spark-master
+      - spark-worker
+      - broker
+      - cassandra
+    environment:
+      KAFKA_BOOTSTRAP: "broker:29092"
+      KAFKA_INPUT_TOPIC: "tenantA.bronze.raw"
+      KAFKA_ALERT_TOPIC: "tenantA.alerts"
+      CASSANDRA_HOST: "cassandra"
+      CASSANDRA_KEYSPACE: "tenanta_analytics"
+      CASSANDRA_TABLE: "window_results"
+      # ── Part 2 Q3 — change window parameters here
+      WINDOW_DURATION: "5 minutes"
+      WINDOW_SLIDE: "1 minute"
+      WATERMARK_DELAY: "2 minutes"
+      TRIGGER_INTERVAL: "30 seconds"
+      # ── Alert thresholds (WHO: PM2.5=15, PM10=45 μg/m³)
+      PM25_ALERT_THRESHOLD: "15.0"
+      PM10_ALERT_THRESHOLD: "45.0"
+      # ── Part 2 Q5 — increase for parallelism tests
+      SPARK_SHUFFLE_PARTITIONS: "4"
+    volumes:
+      - spark_checkpoint:/tmp/spark-checkpoint
+    command: >
+      spark-submit
+        --master local[2]
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,com.datastax.spark:spark-cassandra-connector_2.12:3.5.0
+        --conf spark.cassandra.connection.host=cassandra
+        --conf spark.cassandra.connection.port=9042
+        --conf spark.sql.streaming.checkpointLocation=/tmp/spark-checkpoint/streamanalyticsapp
+        /app/streamanalyticsapp.py
+    restart: on-failure
+
+  # ── Tenant Alert Consumer ──────────────────────────────────────────────────
+  # Simulates the tenant receiving real-time alerts from Spark
+  # View alerts: docker logs -f tenant-alert-consumer
+  tenant-alert-consumer:
+    image: mysimbdp-platform:latest
+    container_name: tenant-alert-consumer
+    depends_on:
+      streamingestmanager:
+        condition: service_started
+      broker:
+        condition: service_started
+    environment:
+      KAFKA_BOOTSTRAP: "broker:29092"
+      KAFKA_ALERT_TOPIC: "tenantA.alerts"
+      CONSUMER_GROUP: "tenantA-alert-service"
+    command: ["python", "alert_consumer.py"]
+    restart: on-failure
+
+volumes:
+  cassandra_data:
+  spark_checkpoint:

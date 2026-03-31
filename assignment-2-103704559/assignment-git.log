@@ -1,0 +1,113 @@
+commit d06537aaa322e3c2877dafcf96034bee0424b85e
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Fri Mar 13 08:33:07 2026 +0200
+
+    report finalized
+
+commit 7536f3580b283acf3bf53fb91f93a1798adfa4f1
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Wed Mar 11 03:21:37 2026 +0200
+
+    removed cache
+
+commit a4ca743499f66a947cbe4a93df7d873552b8e80f
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Wed Mar 11 03:14:48 2026 +0200
+
+    report started
+
+commit 4b46c157c3b86f325c27a13b5e1c462a2aad56d4
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Wed Mar 11 02:58:16 2026 +0200
+
+    made proper folder structure
+
+commit 73106b967c74f083780562fbcaecf86f58479f9f
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Wed Mar 11 02:09:17 2026 +0200
+
+    added deployement guidline
+
+commit 457f69fd4cd1129b5ff2825c6854c3055eec5f28
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Wed Mar 11 01:55:56 2026 +0200
+
+    fix issues
+
+commit a0f2901121b3b480905dc80b8fe5618a7d40dc6a
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Tue Mar 10 23:57:44 2026 +0200
+
+    worked on part 2
+
+commit fd83026bdb2611182b44e861d201b260cbafd794
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Sun Mar 1 03:41:31 2026 +0200
+
+     latest
+
+commit 11fb2b0aeb4242f3700c0434b7cac00b59e18543
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Sun Mar 1 02:51:59 2026 +0200
+
+    revert2
+
+commit 9195719528a8f9e4eff5ec44bb75b027efc807d3
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Sun Mar 1 02:28:20 2026 +0200
+
+    reverted
+
+commit a33d5085685e4b0a686b67e47cfe4cc3ef7949f5
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Sun Mar 1 01:58:25 2026 +0200
+
+    hgih traffic and limit utilization checking
+
+commit df08320b7f770aef3970d0e779a095845468d509
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Sun Mar 1 01:32:31 2026 +0200
+
+    implemented Monitor post alert feature
+
+commit f7a765c9dec4e86ca7af0214e6ed579e66383e19
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Sun Mar 1 00:56:54 2026 +0200
+
+    implemetned monitor report the metric from the worker to a table in cassndra,  changed worker to post the information to monitor, changes the compseo , and docker related code
+
+commit edad205558d54bb815a72f8454b990560919b136
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Sun Mar 1 00:03:11 2026 +0200
+
+    implemeneted the monitor that starts and stops the wokrer from api call
+
+commit f2d2363a08f77ed95e308ccb335cfd0f5adcd235
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Sat Feb 28 22:54:33 2026 +0200
+
+    implemented streamingestworker as a python code ingesting data into cassandra, also added cassadnra deployemeny script in boostrap
+
+commit 7fea77fc95f8454261198a75d7ca9af72692332e
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Fri Feb 27 01:52:32 2026 +0200
+
+    deployement text added
+
+commit fa49aca200804addc508e938b31bb24ed284c662
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Fri Feb 27 01:50:15 2026 +0200
+
+    2 tenant producer created fetchifn data from airquaily api and sending to kafka topics of its own
+
+commit ba914825ace3ef9b3aa6e9109bd6aadb0c7c8c5b
+Author: sabeehwaqas <sabeehwaqa12@gmail.com>
+Date:   Fri Feb 27 01:14:22 2026 +0200
+
+    kafka cluster created
+
+commit 3f5106d5ae03c3e4e35dd86ee723a69c923ac70c
+Author: Muhammad Sabeeh Waqas <71338967+sabeehwaqas@users.noreply.github.com>
+Date:   Fri Feb 27 00:04:00 2026 +0200
+
+    Initial commit

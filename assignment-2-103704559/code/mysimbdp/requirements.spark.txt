@@ -1,0 +1,4 @@
+# requirements.spark.txt  —  Python deps for streamanalyticsapp
+# pyspark is already in bitnami/spark:3.5 — do NOT add it here (version conflict)
+requests==2.31.0
+cassandra-driver==3.29.0

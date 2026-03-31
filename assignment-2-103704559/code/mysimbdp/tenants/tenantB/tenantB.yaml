@@ -1,0 +1,37 @@
+# mysimbdp Service Agreement - TenantB
+# Platform provider enforces these constraints before running silverpipeline.
+# Tenant: TenantB (geo-tagged sensor data - nested schema, location-focused)
+
+tenant_id: "tenantB"
+pipeline_script: "silverpipeline_tenantB.py"
+
+scheduling:
+  interval_minutes: 5 # how often batchmanager runs this pipeline
+  max_runtime_seconds: 180 # TenantB has more nested parsing, allow more time
+
+data_limits:
+  max_records_per_run: 3000 # lower limit — TenantB data is larger per record
+  max_file_size_mb: 75
+  max_cache_files_pending: 15 # stricter — TenantB has a slower downstream
+
+silver_table:
+  keyspace: "tenantB_silver"
+  table: "geo_measurements"
+
+caching:
+  base_dir: "/app/cache/tenantB"
+  pending_dir: "/app/cache/tenantB/pending"
+  processed_dir: "/app/cache/tenantB/processed"
+
+transformation:
+  # TenantB wants coordinates parsed and a country-level rollup tag
+  cast_numeric: ["lat", "lon", "alt"]
+  derived_fields:
+    - name: "has_pm_data"
+      rule: "check_pm_keys" # true if P1 or P2 exists in measurements
+
+constraints:
+  require_non_empty_bronze: true
+  reject_if_pending_overflow: true
+  reject_if_silver_table_missing: true
+  require_geo_fields: true # TenantB-specific: reject if lat/lon missing
