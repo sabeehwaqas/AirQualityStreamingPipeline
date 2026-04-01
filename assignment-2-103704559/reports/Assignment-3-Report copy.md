@@ -101,11 +101,11 @@ If a record has no timestamp, the other option can be `kafka_ts` it is the times
 
 **Window type and parameters:**
 
-**Sliding window — 1 minute duration, sliding every 30 seconds**
+**Sliding window - 1 minute duration, sliding every 30 seconds**
 
 - Each sensor reading contributes to 2 overlapping windows at the same time
 - A 1 minute window catches pollution spikes quickly, a dangerous PM2.5 reading shows up in results within 1 minute of occurring, rather than being spread and damped across a 5 minute average
-- Sliding every 30 seconds means a new window result is produced every 30 seconds, which matches the Spark trigger interval — so Spark wakes up, processes data, and emits results at the same frequency the window moves, so its all aligned.
+- Sliding every 30 seconds means a new window result is produced every 30 seconds, which matches the Spark trigger interval - so Spark wakes up, processes data, and emits results at the same frequency the window moves, so its all aligned.
 
 **Tradeoff:** Because the window is only 1 minute wide, each window captures fewer sensor readings than a wider window would. This means the averages are a bit noisier and sensitive to a single bad reading. A wider window (like 5 minutes) would give smoother, more reliable averages, but we have to wait longer before an alert is fired.
 
@@ -193,7 +193,7 @@ The diagram below shows the full system. The left side is reused from Asg 2 (Kaf
 - **Cassandra** (reused from Asg 2): Already running. A new `tenanta_analytics` keyspace was added alongside the existing bronze and silver keyspaces. Partitioning by `country` makes per-country queries fast
 - **local[2] Spark mode**: Spark runs with 2 threads inside a single Docker container. For the scale of this assignment (a few thousand records per minute) this is enoughfor now. In production platform manager can switch to a proper Spark cluster with `--master spark://spark-master:7077`
 
-**What is reused from Asg 2:** Kafka broker, Cassandra cluster, Docker network, `tenantA_producer.py` (with environment variable patches for speed control), `bootstrap.sh` (extended to create the new alert topic and analytics schema), and `docker-compose.yaml` (extended with 4 new services). The `streamingestworker` from Asg 2 keeps running and writing raw data to `tenanta_bronze.records` in parallel — the Asg 3 streaming job reads from the same Kafka topic but uses a completely separate consumer group, so neither job interferes with the other.
+**What is reused from Asg 2:** Kafka broker, Cassandra cluster, Docker network, `tenantA_producer.py` (with environment variable patches for speed control), `bootstrap.sh` (extended to create the new alert topic and analytics schema), and `docker-compose.yaml` (extended with 4 new services). The `streamingestworker` from Asg 2 keeps running and writing raw data to `tenanta_bronze.records` in parallel - the Asg 3 streaming job reads from the same Kafka topic but uses a completely separate consumer group, so neither job interferes with the other.
 
 ---
 
@@ -250,28 +250,32 @@ record_count bigint, alert_fired boolean
 
 ### P2.2 - Test Environment
 
-**`[SS NEEDED: Run 'docker compose ps' and screenshot all containers showing 'running']`**
+<img src="./report-img/dockerps.png"/>
 
-```
-[ADD: <img src="./report-img/p22-containers.png"/>]
-```
+<img src="./report-img/dockerdesk.png"/>
 
-The whole test environment runs in Docker on a local MacBook. All services talk to each other over a single Docker bridge network.
+The whole test environment runs in Docker on my local computer. All services talk to each other over a single Docker bridge network like Asg 2.
 
 **What is running:**
 
-- `broker` — Apache Kafka 3.7.2 in KRaft mode (no Zookeeper needed), 6 partitions per topic
-- `cassandra` — Cassandra 4.1, single node, replication factor 1
-- `tenanta-producer` — Python 3.12, polls the sensor.community API every 0.5 seconds (2 messages/second baseline)
-- `spark-streaming` — apache/spark:3.5.5, local[2] mode, triggers every 30 seconds
-- `tenant-alert-consumer` — Python 3.12, reads from `tenantA.alerts` and prints alerts
+- `broker`: Apache Kafka 3.7.2 in KRaft mode (no Zookeeper needed), 6 partitions per topic
+- `cassandra`: Cassandra 4.1, single node, replication factor 1
+- `tenanta-producer`: Python 3.12, polls the sensor.community API every 0.5 seconds (2 messages/second baseline)
+- `spark-streaming`: apache/spark:3.5.5, local[2] mode, triggers every 30 seconds
+- `tenant-alert-consumer`: Python 3.12, reads from `tenantA.alerts` and prints alerts
 
-**How streaming data is produced:** `tenantA_producer.py` fetches one real sensor reading from the sensor.community API every 0.5 seconds and puts it into Kafka. For speed tests, `streaming/speed_test.py` generates fake records locally at controlled rates (1 msg/s, 10 msg/s, 100 msg/s, or flood) without hitting the external API. This makes load testing repeatable and predictable.
+Note: Some other services like cqlsh, for cqlsh server, streaming manager, batchmanager,streamingmonitor these are Asg2 services.
+
+**How streaming data is produced:** `tenantA_producer.py` fetches one real sensor reading from the sensor.community API every 0.5 seconds and puts it into Kafka. For speed tests,
+
+Note: `streaming/speed_test.py` can be used to generates fake records locally at controlled rates (1 msg/s, 10 msg/s, 100 msg/s, or flood) without hitting the external API. This makes load testing repeatable and predictable.
 
 **Key configuration values:**
 
+We can change these are per liking , so far selected value are my personal design choices.
+
 - `WINDOW_DURATION=1 minute`, `WINDOW_SLIDE=30 seconds`, `WATERMARK_DELAY=2 minutes`
-- `PM25_ALERT_THRESHOLD=15.0` μg/m³, `PM10_ALERT_THRESHOLD=45.0` μg/m³
+- `PM25_ALERT_THRESHOLD=15.0` μg/m^3, `PM10_ALERT_THRESHOLD=45.0` μg/m^3
 - `SPARK_SHUFFLE_PARTITIONS=4`, `--master local[2]`
 - Kafka consumer group: `streamanalyticsapp-tenantA`
 - Checkpoint location: Docker volume `spark_checkpoint` at `/tmp/spark-checkpoint/streamanalyticsapp`
@@ -280,93 +284,88 @@ The whole test environment runs in Docker on a local MacBook. All services talk 
 
 ### P2.3 - Running the App and Performance Observations
 
-**`[SS NEEDED: docker logs spark-streaming showing batches processing]`**
+docker logs spark-streaming showing batches processing and alerts:
 
-```
-[ADD: <img src="./report-img/p23-spark-batches.png"/>]
-```
+<img src="./report-img/dockerlog1.png"/>]
 
-**`[SS NEEDED: Cassandra SELECT showing window_results rows with data]`**
+Cassandra table showing window_results rows data with alerts fired
 
-```
-[ADD: <img src="./report-img/p23-cassandra-results.png"/>]
-```
+ <img src="./report-img/tenanta_analytics.png"/>
 
-**`[SS NEEDED: docker logs tenant-alert-consumer showing 🚨 alerts]`**
+docker logs tenant-alert-consumer showing alerts
 
-```
-[ADD: <img src="./report-img/p23-alerts.png"/>]
-```
+<img src="./report-img/consumeralert.png"/>
 
 **(i) Effect of varying streaming data speed:**
 
-**`[SS NEEDED: speed_test.py --speed slow running + Cassandra query showing low record_count]`**
+speed_test.py --speed slow running + Cassandra query showing low record_count
 
-```
-[ADD: <img src="./report-img/p23-speed-slow.png"/>]
-```
+stream:
+<img src="./report-img/slowdata.png"/>
 
-**`[SS NEEDED: speed_test.py --speed fast running + Cassandra query showing high record_count]`**
+cassandra:
+<img src="./report-img/slowdata1.png"/>
 
-```
-[ADD: <img src="./report-img/p23-speed-fast.png"/>]
-```
+speed_test.py --speed fast running + Cassandra query showing high record_count
 
-At slow speed (1 msg/s), each 1 minute window builds up roughly 60 records. Spark finishes each batch well within the 30-second trigger interval. Cassandra writes are fast and there is no Kafka lag.
+Stream:
+<img src="./report-img/speed.png"/>
 
-At fast speed (100 msg/s), each window accumulates around 6,000 records. Batch processing time goes up but still stays within the 30-second trigger window with local[2]. Averages are much more stable statistically because there are many more readings per window, and more countries appear in each batch.
+Cassandra:
+<img src="./report-img/speed3.png"/>
 
-At flood speed (as fast as possible), Kafka consumer lag starts building up after about 30 seconds — Spark cannot process records as fast as they arrive. This is expected with only 2 local threads. Switching to local[4] reduces the lag noticeably.
+At slow speed (1 msg/s), each 1 minute window builds up roughly 5 records. Spark finishes each batch well within the 30 second trigger interval. Cassandra writes are fast and there is no Kafka lag.
+
+At fast speed (100 msg/s), each window accumulates around 30 records. Batch processing time goes up but still stays within the 30 second trigger window with local[2]. Averages are much more stable statistically because there are many more readings per window, and more countries appear in each batch.
+
+At flood speed (as fast as possible), Kafka consumer lag starts building up after about 30 seconds, Spark cannot process records as fast as they arrive. This is expected with only 2 local threads. Switching to local[4] reduces the lag noticeably.
 
 **(ii) Effect of changing window parameters:**
 
-**`[SS NEEDED: Cassandra result with WINDOW_DURATION=1 minute — showing more rows, lower record_count]`**
+By default the window size is 1 min
 
-```
-[ADD: <img src="./report-img/p23-window-1min.png"/>]
-```
+**Narrow window (1 min / 30s slide) - default:**
+Cassandra result with WINDOW_DURATION=1 minute: showing more rows, lower record_count
 
-**`[SS NEEDED: Cassandra result with WINDOW_DURATION=5 minutes — showing fewer rows, higher record_count]`**
+ <img src="./report-img/window1.png"/>
 
-```
-[ADD: <img src="./report-img/p23-window-5min.png"/>]
-```
+More rows in Cassandra, each with lower `record_count`. Averages are noisier because fewer readings go into each window. A single bad sensor reading has a bigger effect on the average. Alerts fire faster.
 
-**Narrow window (1 min / 30s slide) — default:** More rows in Cassandra, each with lower `record_count`. Averages are noisier because fewer readings go into each window. A single bad sensor reading has a bigger effect on the average. Alerts fire faster.
+**Wide window (5 min / 1 min slide) - alternative:**
+Cassandra result with WINDOW_DURATION=5 minutes, showing fewer rows, higher record_count
 
-**Wide window (5 min / 1 min slide) — alternative:** Fewer rows, much higher `record_count` per window, smoother and more reliable averages. Better for catching sustained pollution events rather than spikes. Alert latency increases by around 4-5 extra minutes on top of the watermark delay.
+<img src="./report-img/win.png"/>
+<img src="./report-img/window2.png"/>
+
+Fewer rows, much higher `record_count` per window, smoother and more reliable averages. Better for catching sustained pollution events rather than spikes. Alert latency increases by around 4-5 extra minutes on top of the watermark delay.
 
 ---
 
 ### P2.4 - Erroneous Data Handling
 
-**`[SS NEEDED: inject_errors.py running in terminal showing all 7 error types being sent]`**
+inject_errors.py running in terminal showing all 7 error types being sent
 
-```
-[ADD: <img src="./report-img/p24-inject-errors.png"/>]
-```
+ <img src="./report-img/inject.png"/>
+<img src="./report-img/inject2.png"/>
 
-**`[SS NEEDED: docker logs spark-streaming after injection — job still running, no crash]`**
+docker logs spark-streaming after injection, job still running, no crash
+<img src="./report-img/sparksurvive.png"/>
 
-```
-[ADD: <img src="./report-img/p24-spark-survives.png"/>]
-```
-
-**How erroneous data is simulated:** `streaming/inject_errors.py` sends 7 types of bad records directly to `tenantA.bronze.raw` while the streaming job is running:
+**How erroneous data is simulated:** I have created a dedicate python code `streaming/inject_errors.py` to inject errors by sending 7 types of bad records directly to `tenantA.bronze.raw` while the streaming job is running:
 
 | Error type          | What it sends              | How Spark handles it                                                                      |
 | ------------------- | -------------------------- | ----------------------------------------------------------------------------------------- |
 | `MISSING_COUNTRY`   | `country: null`            | Dropped at step 3 (null check)                                                            |
 | `MISSING_TIMESTAMP` | `timestamp: null`          | Dropped at step 3 (null check)                                                            |
-| `NEGATIVE_PM`       | `pm2_5_P2: -999.0`         | Passes the filter — pulls down the window average (visible as an anomaly in Cassandra)    |
-| `WRONG_TYPES`       | `pm2_5_P2: "not-a-number"` | `from_json` turns it into null for a DoubleType field — treated as missing in aggregation |
-| `INVALID_JSON`      | `{ this is not json`       | `from_json` returns an all-null row — dropped by the null country check                   |
+| `NEGATIVE_PM`       | `pm2_5_P2: -999.0`         | Passes the filter - pulls down the window average (visible as an anomaly in Cassandra)    |
+| `WRONG_TYPES`       | `pm2_5_P2: "not-a-number"` | `from_json` turns it into null for a DoubleType field - treated as missing in aggregation |
+| `INVALID_JSON`      | `{ this is not json`       | `from_json` returns an all-null row - dropped by the null country check                   |
 | `EMPTY_PAYLOAD`     | Empty bytes                | Same as invalid JSON                                                                      |
 | `VALID`             | Normal record              | Processed as usual                                                                        |
 
-**Test design:** 10 records of each error type were injected while the job was running. The job was watched for 3 consecutive batches after injection.
+**Test design:** 10 records of each error type were injected while the job was running. The job was watched for multiple consecutive batches after injection.
 
-**Results:** The streaming job never crashed or stopped during error injection. Structurally bad records (null country, null timestamp, invalid JSON) were silently dropped and did not reach the aggregation step. The `record_count` in affected windows was slightly lower than normal, reflecting the dropped records. The `NEGATIVE_PM` records did pull down `avg_pm25` values in windows where they landed — this is expected behaviour. The filter only removes records that are structurally broken (missing required fields), not ones that have physically impossible values. Adding a domain-level validation step (rejecting values below 0) would require an extra filter and is a known limitation of the current design.
+**Results:** The streaming job never crashed or stopped during error injection. Structurally bad records (null country, null timestamp, invalid JSON) were silently dropped and did not reach the aggregation step. The `record_count` in affected windows must be slightly lower than normal, reflecting the dropped records. The filter only removes records that are structurally broken (missing required fields), not ones that have physically impossible values. Adding a domain-level validation step (rejecting values below 0) would require an extra filter and is a known limitation of the current design.
 
 ---
 
@@ -374,18 +373,18 @@ At flood speed (as fast as possible), Kafka consumer lag starts building up afte
 
 **What controls parallelism in this setup:**
 
-- `--master local[2]` — the number of CPU threads Spark uses for task execution
-- `SPARK_SHUFFLE_PARTITIONS` — how many partitions are created when Spark reshuffles data during the `groupBy` operation
-- Kafka topic partitions (6) — this is the hard upper limit on how many Kafka partitions Spark can read in parallel
-- Number of distinct countries in the data — determines how many groups exist per window; if only 3 countries appear in a batch, you cannot parallelise more than 3 groups no matter how many threads you have
+- `--master local[2]` - the number of CPU threads Spark uses for task execution
+- `SPARK_SHUFFLE_PARTITIONS` - how many partitions are created when Spark reshuffles data during the `groupBy` operation
+- Kafka topic partitions (6) - this is the hard upper limit on how many Kafka partitions Spark can read in parallel
+- Number of distinct countries in the data - determines how many groups exist per window; if only 3 countries appear in a batch, you cannot parallelise more than 3 groups no matter how many threads you have
 
-**`[SS NEEDED: spark-streaming logs at local[2] during flood speed — showing batch durations]`**
+**`[SS NEEDED: spark-streaming logs at local[2] during flood speed - showing batch durations]`**
 
 ```
 [ADD: <img src="./report-img/p25-local2.png"/>]
 ```
 
-**`[SS NEEDED: spark-streaming logs at local[4] during flood speed — showing faster batch durations]`**
+**`[SS NEEDED: spark-streaming logs at local[4] during flood speed - showing faster batch durations]`**
 
 ```
 [ADD: <img src="./report-img/p25-local4.png"/>]
@@ -399,7 +398,7 @@ At flood speed (as fast as possible), Kafka consumer lag starts building up afte
 | local[4], partitions=8  | `[ADD value]` ms             | `[ADD value]` records |
 | local[8], partitions=16 | `[ADD value]` ms             | `[ADD value]` records |
 
-Increasing parallelism reduces batch duration, but only up to a point. Beyond local[4], the gains get smaller because the bottleneck shifts from CPU to Kafka fetch rate and Cassandra write speed. With a single-node Cassandra, throwing more parallel threads at it actually makes things worse — more threads compete for the same Cassandra coordinator, which increases write latency rather than reducing it.
+Increasing parallelism reduces batch duration, but only up to a point. Beyond local[4], the gains get smaller because the bottleneck shifts from CPU to Kafka fetch rate and Cassandra write speed. With a single-node Cassandra, throwing more parallel threads at it actually makes things worse - more threads compete for the same Cassandra coordinator, which increases write latency rather than reducing it.
 
 ---
 
@@ -411,19 +410,19 @@ The simplest way to plug in an external ML inference REST service is to call it 
 
 Here is what the flow would look like:
 
-1. The Spark streaming job runs as normal and produces a batch of window results (e.g., 20 rows — one per country per window)
+1. The Spark streaming job runs as normal and produces a batch of window results (e.g., 20 rows - one per country per window)
 2. Inside `write_batch()`, before writing to Cassandra, those 20 rows get serialized into a JSON list and sent in a single HTTP POST to the ML service endpoint
-3. The ML service returns a prediction for each row — for example a pollution forecast for the next hour, or a flag saying whether the reading looks like a sensor malfunction
+3. The ML service returns a prediction for each row - for example a pollution forecast for the next hour, or a flag saying whether the reading looks like a sensor malfunction
 4. That prediction gets added as an extra column to the result and written to Cassandra alongside the original window data
 
 What the tenant needs to do to use this:
 
 1. Register the ML service URL as an environment variable in `docker-compose.yaml` (e.g., `ML_SERVICE_URL`)
 2. Add an HTTP client call inside `write_batch()` using Python's `requests` library
-3. Add retry and timeout logic — ML inference can be slow, and if the service is down the Spark job should not hang
+3. Add retry and timeout logic - ML inference can be slow, and if the service is down the Spark job should not hang
 4. Define the schema of what the ML service returns so it can be stored cleanly in Cassandra
 
-The most important design choice is to send the whole batch in one HTTP request rather than one request per record. Sending 20 rows in one call is far faster than 20 separate calls — it reduces network overhead and lets the ML service process the batch efficiently.
+The most important design choice is to send the whole batch in one HTTP request rather than one request per record. Sending 20 rows in one call is far faster than 20 separate calls - it reduces network overhead and lets the ML service process the batch efficiently.
 
 ---
 
@@ -438,12 +437,12 @@ invalid = parsed.filter(col("country").isNull()    | col("timestamp").isNull())
 
 The `invalid` branch gets written to a separate Cassandra table `tenanta_analytics.bad_records` with these columns:
 
-- `ingest_ts` — when the bad record arrived
-- `raw_value` — the original message bytes as a string so the full bad record is preserved
-- `error_reason` — which check it failed (e.g., `MISSING_COUNTRY`, `INVALID_JSON`)
-- `batch_id` — which Spark batch it came from
+- `ingest_ts` - when the bad record arrived
+- `raw_value` - the original message bytes as a string so the full bad record is preserved
+- `error_reason` - which check it failed (e.g., `MISSING_COUNTRY`, `INVALID_JSON`)
+- `batch_id` - which Spark batch it came from
 
-Both the valid write to `window_results` and the invalid write to `bad_records` happen inside the same `foreachBatch` call. This keeps them in sync — either both happen or neither does.
+Both the valid write to `window_results` and the invalid write to `bad_records` happen inside the same `foreachBatch` call. This keeps them in sync - either both happen or neither does.
 
 A data engineer can then query `bad_records` at any time to see what went wrong, fix the upstream producer if needed, or replay corrected records.
 
@@ -467,7 +466,7 @@ Here is the full flow with a diagram:
   payload: { country, triggered_at, alert_count, avg_pm25 }
         |
         v
-[Airflow DAG — 3 tasks in sequence]
+[Airflow DAG - 3 tasks in sequence]
         |
         |--- Task 1: batch_analytics
         |    Reads tenanta_analytics.window_results from Cassandra
@@ -488,22 +487,22 @@ Here is the full flow with a diagram:
 
 Why use Airflow rather than just writing this in plain Python?
 
-- If Task 1 fails, Airflow retries it automatically — Task 2 never runs with missing data
-- If Task 2 fails, the analytics result from Task 1 is still saved — you can re-run Task 2 alone from the Airflow UI without redoing the analysis
-- Every run is fully logged — when it started, how long each step took, what failed
-- The `alert_consumer.py` just fires one HTTP POST and forgets — it does not need to know how GCS works or how to send email
+- If Task 1 fails, Airflow retries it automatically - Task 2 never runs with missing data
+- If Task 2 fails, the analytics result from Task 1 is still saved - you can re-run Task 2 alone from the Airflow UI without redoing the analysis
+- Every run is fully logged - when it started, how long each step took, what failed
+- The `alert_consumer.py` just fires one HTTP POST and forgets - it does not need to know how GCS works or how to send email
 
 ---
 
 ### P3.4 - Schema Evolution
 
-**How the running job handles a new schema:** The `INPUT_SCHEMA` in `streamanalyticsapp.py` is defined explicitly. When new data arrives with a different schema — for example a new field `temperature` is added, or `pm2_5_P2` gets renamed to `pm25` — PySpark's `from_json` handles it gracefully: unknown fields are ignored, and missing fields come through as null. The job will not crash. But it will silently miss the new field, which could be a problem if the new field is important.
+**How the running job handles a new schema:** The `INPUT_SCHEMA` in `streamanalyticsapp.py` is defined explicitly. When new data arrives with a different schema - for example a new field `temperature` is added, or `pm2_5_P2` gets renamed to `pm25` - PySpark's `from_json` handles it gracefully: unknown fields are ignored, and missing fields come through as null. The job will not crash. But it will silently miss the new field, which could be a problem if the new field is important.
 
 **How the developer finds out about a schema change before it causes problems:**
 
-Option 1 — Schema registry: Use Confluent Schema Registry (or a simple version table stored in Cassandra). The producer registers its current schema on startup. The streaming job reads the registered schema on startup and compares it with its own `INPUT_SCHEMA`. If they differ, the job refuses to start and logs a clear warning. A monitoring alert then notifies the developer.
+Option 1 - Schema registry: Use Confluent Schema Registry (or a simple version table stored in Cassandra). The producer registers its current schema on startup. The streaming job reads the registered schema on startup and compares it with its own `INPUT_SCHEMA`. If they differ, the job refuses to start and logs a clear warning. A monitoring alert then notifies the developer.
 
-Option 2 — Schema version field: Add a `schema_version` integer to every Kafka message. Inside `write_batch()`, the job checks this field. If it sees a version number it does not recognise, it routes those records to the `bad_records` table and publishes an alert to `tenantA.alerts` with `alert_reason = UNKNOWN_SCHEMA_VERSION`. The developer sees this in the monitoring dashboard and knows a new schema has been deployed upstream.
+Option 2 - Schema version field: Add a `schema_version` integer to every Kafka message. Inside `write_batch()`, the job checks this field. If it sees a version number it does not recognise, it routes those records to the `bad_records` table and publishes an alert to `tenantA.alerts` with `alert_reason = UNKNOWN_SCHEMA_VERSION`. The developer sees this in the monitoring dashboard and knows a new schema has been deployed upstream.
 
 Both options give the developer a heads-up before bad data silently corrupts the analytics results.
 
@@ -515,19 +514,19 @@ Both options give the developer a heads-up before bad data silently corrupts the
 
 **What the current design already gets right:**
 
-1. **Producer to Kafka:** The producer uses `enable.idempotence=True` — so even if it retries a send, Kafka deduplicates it. No duplicate messages from the producer side.
+1. **Producer to Kafka:** The producer uses `enable.idempotence=True` - so even if it retries a send, Kafka deduplicates it. No duplicate messages from the producer side.
 
 2. **Kafka to Spark:** Spark reads with checkpointing enabled. If Spark restarts, it picks up from the last committed Kafka offset and does not skip or reprocess records at the Spark state level.
 
-3. **Spark to Cassandra:** The Cassandra write is idempotent — writing the same `(country, window_start)` row twice just overwrites it with the same data. So even if a batch is retried, Cassandra ends up with the correct result.
+3. **Spark to Cassandra:** The Cassandra write is idempotent - writing the same `(country, window_start)` row twice just overwrites it with the same data. So even if a batch is retried, Cassandra ends up with the correct result.
 
 **Where exactly-once breaks down:**
 
-The problem is the dual write inside `foreachBatch` — writing to both Cassandra and Kafka in the same batch. These are two separate systems with no shared transaction. If the Cassandra write succeeds but the Kafka alert publish then fails (or the other way around), the two sinks end up inconsistent. A retry will fix Cassandra again but the alert may now be published twice.
+The problem is the dual write inside `foreachBatch` - writing to both Cassandra and Kafka in the same batch. These are two separate systems with no shared transaction. If the Cassandra write succeeds but the Kafka alert publish then fails (or the other way around), the two sinks end up inconsistent. A retry will fix Cassandra again but the alert may now be published twice.
 
 **What would be needed for true exactly-once:**
 
 - Use Kafka's transactional producer API (`transactional.id` + `isolation.level=read_committed`) for the alert publish
-- This still does not cover the Cassandra side — Cassandra does not support distributed transactions with Kafka
+- This still does not cover the Cassandra side - Cassandra does not support distributed transactions with Kafka
 
 In practice, the current design is close enough for a public health monitoring use case. A duplicate alert is much less harmful than a missed alert, and the Cassandra data is always correct because writes are idempotent. True end-to-end exactly-once across two different storage systems would require a two-phase commit or saga pattern, which adds significant complexity and latency for limited real-world benefit in this scenario.
