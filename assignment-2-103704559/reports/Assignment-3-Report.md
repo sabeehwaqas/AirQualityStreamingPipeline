@@ -7,12 +7,12 @@
 
 ## Overview
 
-<u>This assignment extends the mysimbdp platform from Assignment 2 with stream analytics capabilities. The same infrastructure (Kafka, Cassandra, Docker) is reused.</u> A PySpark Structured Streaming job is added that consumes raw sensor readings in real time, computes sliding-window aggregations per country, detects PM2.5/PM10 threshold breaches, writes analytics results to Cassandra, and publishes alerts back to the tenant via a dedicated Kafka topic.
+<u>This assignment extends the mysimbdp platform from Assignment 2 with stream analytics capabilities. The same infrastructure (Kafka, Cassandra, Docker) is reused.</u> A PySpark streaming job is added that takes raw sensor readings in real time, then computes sliding window, aggregates per country and detects PM2.5/PM10 threshold, after that writes analytics results to Cassandra, and publishes alerts back to the tenant via a dedicated Kafka topic.
 
 **Tech stack:** Apache Kafka (messaging), PySpark Structured Streaming (stream processing), Cassandra (mysimbdp-coredms), Python, Docker Compose.
 
 **Architecture diagram:**
-<img src="./report-img/BDF-Asg3-drawio.png" alt="isolated" width="2000"/>
+<img src="./report-img/BDF-Asg3-drawio.svg" alt="isolated" width="2000"/>
 
 ---
 
@@ -158,7 +158,7 @@ New Architecure which incluses a new Kafka alert Topic , Apache Apark and New ca
 <img src="./report-img/BDF-Asg3-drawio-streamonly.svg" alt="isolated" width="20000"/>
 
 Full Combined architecture
-<img src="./report-img/BDF-Asg3-drawio.png" alt="isolated" width="2000"/>
+<img src="./report-img/BDF-Asg3-drawio.svg" alt="isolated" width="2000"/>
 
 **Technology choices:**
 
