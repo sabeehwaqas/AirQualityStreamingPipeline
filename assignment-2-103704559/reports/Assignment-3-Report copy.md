@@ -365,7 +365,7 @@ docker logs spark-streaming after injection, job still running, no crash
 
 **Test design:** 10 records of each error type were injected while the job was running. The job was watched for multiple consecutive batches after injection.
 
-**Results:** The streaming job never crashed or stopped during error injection. Structurally bad records (null country, null timestamp, invalid JSON) were silently dropped and did not reach the aggregation step. The `record_count` in affected windows must be slightly lower than normal, reflecting the dropped records. The filter only removes records that are structurally broken (missing required fields), not ones that have physically impossible values. Adding a domain-level validation step (rejecting values below 0) would require an extra filter and is a known limitation of the current design.
+**Results:** The streaming job never crashed or stopped during error injection. Bad records (null country, null timestamp, invalid JSON) were dropped and did not reach the aggregation step. The `record_count` in affected windows must be slightly lower than normal, reflecting the dropped records. The filter only removes records that are structurally broken (missing required fields), not ones that have physically impossible values. Adding a domain-level validation step (rejecting values below 0) would require an extra filter.
 
 ---
 
@@ -373,32 +373,33 @@ docker logs spark-streaming after injection, job still running, no crash
 
 **What controls parallelism in this setup:**
 
-- `--master local[2]` - the number of CPU threads Spark uses for task execution
-- `SPARK_SHUFFLE_PARTITIONS` - how many partitions are created when Spark reshuffles data during the `groupBy` operation
-- Kafka topic partitions (6) - this is the hard upper limit on how many Kafka partitions Spark can read in parallel
-- Number of distinct countries in the data - determines how many groups exist per window; if only 3 countries appear in a batch, you cannot parallelise more than 3 groups no matter how many threads you have
+- `--master local[2]` : the number of CPU threads Spark uses for task execution
+- `SPARK_SHUFFLE_PARTITIONS` : how many partitions are created when Spark reshuffles data during the `groupBy` operation
+- Kafka topic partitions (6) : this is the hard upper limit on how many Kafka partitions Spark can read in parallel
+- Number of distinct countries in the data : determines how many groups exist per window; if only 3 countries appear in a batch, you cannot parallelise more than 3 groups no matter how many threads you have
 
-**`[SS NEEDED: spark-streaming logs at local[2] during flood speed - showing batch durations]`**
+spark-streaming logs at local[2] during flood speed - showing batch durations
+<img src="./report-img/log2-1.png"/>
 
-```
-[ADD: <img src="./report-img/p25-local2.png"/>]
-```
+<img src="./report-img/log2-2.png"/>
 
-**`[SS NEEDED: spark-streaming logs at local[4] during flood speed - showing faster batch durations]`**
-
-```
-[ADD: <img src="./report-img/p25-local4.png"/>]
-```
+spark-streaming logs at local[4] during flood speed - showing faster batch durations
+<img src="./report-img/lag3.png"/>
+<img src="./report-img/lag31.png"/>
 
 **Test results:**
 
-| Configuration           | Batch duration (flood speed) | Kafka lag after 60s   |
-| ----------------------- | ---------------------------- | --------------------- |
-| local[2], partitions=4  | `[ADD value]` ms             | `[ADD value]` records |
-| local[4], partitions=8  | `[ADD value]` ms             | `[ADD value]` records |
-| local[8], partitions=16 | `[ADD value]` ms             | `[ADD value]` records |
+| Configuration          | Batch duration (flood speed) | Kafka lag after 60s |
+| ---------------------- | ---------------------------- | ------------------- |
+| local[2], partitions=4 | ~ 30 s                       | 0 records           |
+| local[4], partitions=8 | ~ 29 s                       | 0 records           |
 
-Increasing parallelism reduces batch duration, but only up to a point. Beyond local[4], the gains get smaller because the bottleneck shifts from CPU to Kafka fetch rate and Cassandra write speed. With a single-node Cassandra, throwing more parallel threads at it actually makes things worse - more threads compete for the same Cassandra coordinator, which increases write latency rather than reducing it.
+Parallesim is not an Issue here Why?:
+
+Increasing parallelism from local[2] to local[4] produced no measurable difference in batch duration or Kafka lag in this test environment. This is expected as the bottleneck is not CPU parallelism but the data arrival rate. The live sensor.community API produces at most 2 messages per second, which means each 1 minute window accumulates only around 60-120 records. Spark processes this in well under the 30 second trigger interval regardless of thread count, so there is no parallelism bottleneck to expose. A meaningful parallelism difference would appear at flood speed (100+ msg/s) with a larger dataset.
+
+But as per thoery:
+At bigger scale, increasing from local[2] to local[4] would reduce batch duration because the groupBy shuffle and Cassandra write operations can execute across more threads. However, beyond local[4], gains will probably diminish and the bottleneck shifts to Kafka fetch rate and Cassandra write throughput. With a single node Cassandra, more concurrent write threads actually compete for the same coordinator, which can increase write latency rather than reduce it.
 
 ---
 
@@ -408,27 +409,27 @@ Increasing parallelism reduces batch duration, but only up to a point. Beyond lo
 
 The simplest way to plug in an external ML inference REST service is to call it from inside the `foreachBatch` function, after the window aggregation produces a batch of results.
 
-Here is what the flow would look like:
+Here is what the new workflow would look like:
 
 1. The Spark streaming job runs as normal and produces a batch of window results (e.g., 20 rows - one per country per window)
 2. Inside `write_batch()`, before writing to Cassandra, those 20 rows get serialized into a JSON list and sent in a single HTTP POST to the ML service endpoint
-3. The ML service returns a prediction for each row - for example a pollution forecast for the next hour, or a flag saying whether the reading looks like a sensor malfunction
+3. The ML service returns a prediction for each row, for example a pollution forecast for the next hour, or a flag saying whether the reading looks like a sensor malfunction
 4. That prediction gets added as an extra column to the result and written to Cassandra alongside the original window data
 
 What the tenant needs to do to use this:
 
 1. Register the ML service URL as an environment variable in `docker-compose.yaml` (e.g., `ML_SERVICE_URL`)
 2. Add an HTTP client call inside `write_batch()` using Python's `requests` library
-3. Add retry and timeout logic - ML inference can be slow, and if the service is down the Spark job should not hang
+3. Add retry and timeout logic , ML inference can be slow, and if the service is down the Spark job should not hang
 4. Define the schema of what the ML service returns so it can be stored cleanly in Cassandra
 
-The most important design choice is to send the whole batch in one HTTP request rather than one request per record. Sending 20 rows in one call is far faster than 20 separate calls - it reduces network overhead and lets the ML service process the batch efficiently.
+The most important design choice is to send the whole batch in one HTTP request rather than one request per record. Sending 20 rows in one call is far faster than 20 separate calls, it reduces network overhead and lets the ML service process the batch efficiently.
 
 ---
 
 ### P3.2 - Storing Erroneous Records for Inspection
 
-Right now, records that fail validation (null country, null timestamp, unparseable JSON) are silently dropped and lost forever. To save them for later inspection, the approach is to split the data stream into two branches before the null filter step:
+Right now, records that fail validation (null country, null timestamp, unparseable JSON) are silently dropped and lost forever. To save them for later inspection, one of the approach can be to split the data stream into two branches before the null filter step:
 
 ```python
 valid   = parsed.filter(col("country").isNotNull() & col("timestamp").isNotNull())
@@ -444,89 +445,59 @@ The `invalid` branch gets written to a separate Cassandra table `tenanta_analyti
 
 Both the valid write to `window_results` and the invalid write to `bad_records` happen inside the same `foreachBatch` call. This keeps them in sync - either both happen or neither does.
 
-A data engineer can then query `bad_records` at any time to see what went wrong, fix the upstream producer if needed, or replay corrected records.
+A tenant can then query `bad_records` at any time to see what went wrong, fix the upstream producer if needed, or replay corrected records.
 
 ---
 
 ### P3.3 - Workflow Coordination for Batch Analytics Trigger
 
-When the tenant's `alert_consumer.py` detects a critical condition (more than 10 alerts for the same country within 5 minutes), it should trigger a deeper historical analysis automatically. Apache Airflow handles this coordination.
+When the tenant's `alert_consumer.py` detects a critical condition (more than 10 alerts for the same country within 5 minutes), it should trigger a deeper historical analysis automatically. Apache Airflow can be used here to handles this coordination.
 
 Here is the full flow with a diagram:
 
-```
-[tenant-alert-consumer]
-  receives alerts from tenantA.alerts
-  keeps a rolling count per country
-  IF count > 10 in last 5 minutes:
-        |
-        v
-[Airflow REST API]
-  POST /api/v1/dags/air_quality_batch_analytics/dagRuns
-  payload: { country, triggered_at, alert_count, avg_pm25 }
-        |
-        v
-[Airflow DAG - 3 tasks in sequence]
-        |
-        |--- Task 1: batch_analytics
-        |    Reads tenanta_analytics.window_results from Cassandra
-        |    for the last 24 hours for the triggered country
-        |    Computes hourly averages, peak window, breach count
-        |    Writes result to /tmp/batch_result_{country}.parquet
-        |
-        |--- Task 2: upload_results
-        |    Reads the parquet file from Task 1
-        |    Uploads to GCS: gs://bucket/batch_reports/{country}/{date}/
-        |    Writes a small JSON metadata file alongside it
-        |
-        |--- Task 3: notify_tenant
-             Reads the GCS path from Task 2
-             Sends email (SendGrid) or Slack message to tenant user
-             Contains: country, peak PM2.5, breach count, download link
-```
-
+  <img src="./report-img/airflow.svg"/>
 Why use Airflow rather than just writing this in plain Python?
 
-- If Task 1 fails, Airflow retries it automatically - Task 2 never runs with missing data
-- If Task 2 fails, the analytics result from Task 1 is still saved - you can re-run Task 2 alone from the Airflow UI without redoing the analysis
-- Every run is fully logged - when it started, how long each step took, what failed
-- The `alert_consumer.py` just fires one HTTP POST and forgets - it does not need to know how GCS works or how to send email
+- If Task 1 fails, Airflow retries it automatically and Task 2 never runs with missing data
+- If Task 2 fails, the analytics result from Task 1 is still saved then we can rerun Task 2 alone from the Airflow UI without redoing the analysis
+- Every run is fully logged, when it started, how long each step took, what failed
+- The `alert_consumer.py` just fires one HTTP POST and forgets, it does not need to know how GCS works or how to send email
 
 ---
 
 ### P3.4 - Schema Evolution
 
-**How the running job handles a new schema:** The `INPUT_SCHEMA` in `streamanalyticsapp.py` is defined explicitly. When new data arrives with a different schema - for example a new field `temperature` is added, or `pm2_5_P2` gets renamed to `pm25` - PySpark's `from_json` handles it gracefully: unknown fields are ignored, and missing fields come through as null. The job will not crash. But it will silently miss the new field, which could be a problem if the new field is important.
+**How the running job handles a new schema:** The `INPUT_SCHEMA` in `streamanalyticsapp.py` is defined explicitly. When new data arrives with a different schema, for example a new field `temperature` is added, or `pm2_5_P2` gets renamed to `pm25` then PySpark's `from_json` handles it nicely: unknown fields are ignored, and missing fields come through as null. The job will not crash. But it will silently miss the new field, which could be a problem if the new field is important.
 
 **How the developer finds out about a schema change before it causes problems:**
 
-Option 1 - Schema registry: Use Confluent Schema Registry (or a simple version table stored in Cassandra). The producer registers its current schema on startup. The streaming job reads the registered schema on startup and compares it with its own `INPUT_SCHEMA`. If they differ, the job refuses to start and logs a clear warning. A monitoring alert then notifies the developer.
+Option 1 - Schema registry: Use Confluent Schema Registry (or a simple version table stored in Cassandra). The producer registers its current schema on startup. The streaming job reads the registered schema on startup and compares it with its own `INPUT_SCHEMA`. If they differ, the job refuses to start and logs a clear warning. A monitoring alert then notifies the platform manager.
 
-Option 2 - Schema version field: Add a `schema_version` integer to every Kafka message. Inside `write_batch()`, the job checks this field. If it sees a version number it does not recognise, it routes those records to the `bad_records` table and publishes an alert to `tenantA.alerts` with `alert_reason = UNKNOWN_SCHEMA_VERSION`. The developer sees this in the monitoring dashboard and knows a new schema has been deployed upstream.
+Option 2 - Schema version field: Add a `schema_version` integer to every Kafka message. Inside `write_batch()`, the job checks this field. If it sees a version number it does not recognise, it routes those records to the `bad_records` table and publishes an alert to `tenantA.alerts` with `alert_reason = UNKNOWN_SCHEMA_VERSION`. The platform manager sees this in the monitoring dashboard and knows a new schema has been deployed upstream.
 
-Both options give the developer a heads-up before bad data silently corrupts the analytics results.
+Both options give the platform a heads-up before bad data silently corrupts the analytics results.
 
 ---
 
 ### P3.5 - End-to-End Exactly-Once Delivery
 
-**Short answer:** End-to-end exactly-once is not fully achievable with the current design, but it is very close, and the gap is small and well-understood.
+**Short answer:** End-to-end exactly-once is not fully achievable with the current design, but possible
 
 **What the current design already gets right:**
 
-1. **Producer to Kafka:** The producer uses `enable.idempotence=True` - so even if it retries a send, Kafka deduplicates it. No duplicate messages from the producer side.
+1. **Producer to Kafka:** The producer uses `enable.idempotence=True`, so even if it retries a send, Kafka deduplicates it. No duplicate messages from the producer side.
 
 2. **Kafka to Spark:** Spark reads with checkpointing enabled. If Spark restarts, it picks up from the last committed Kafka offset and does not skip or reprocess records at the Spark state level.
 
-3. **Spark to Cassandra:** The Cassandra write is idempotent - writing the same `(country, window_start)` row twice just overwrites it with the same data. So even if a batch is retried, Cassandra ends up with the correct result.
+3. **Spark to Cassandra:** The Cassandra write is idempotent so writing the same `(country, window_start)` row twice just overwrites it with the same data. So even if a batch is retried, Cassandra ends up with the correct result.
 
 **Where exactly-once breaks down:**
 
-The problem is the dual write inside `foreachBatch` - writing to both Cassandra and Kafka in the same batch. These are two separate systems with no shared transaction. If the Cassandra write succeeds but the Kafka alert publish then fails (or the other way around), the two sinks end up inconsistent. A retry will fix Cassandra again but the alert may now be published twice.
+The problem is the dual write inside `foreachBatch` , writing to both Cassandra and Kafka in the same batch. These are two separate systems with no shared transaction. If the Cassandra write succeeds but the Kafka alert publish then fails (or the other way around), the two sinks end up inconsistent. A retry will fix Cassandra again but the alert may now be published twice.
 
 **What would be needed for true exactly-once:**
 
 - Use Kafka's transactional producer API (`transactional.id` + `isolation.level=read_committed`) for the alert publish
-- This still does not cover the Cassandra side - Cassandra does not support distributed transactions with Kafka
+- This still does not cover the Cassandra side as Cassandra does not support distributed transactions with Kafka
 
-In practice, the current design is close enough for a public health monitoring use case. A duplicate alert is much less harmful than a missed alert, and the Cassandra data is always correct because writes are idempotent. True end-to-end exactly-once across two different storage systems would require a two-phase commit or saga pattern, which adds significant complexity and latency for limited real-world benefit in this scenario.
+In practice, the current design is close enough for a public health monitoring use case. A duplicate alert is much less harmful than a missed alert, and the Cassandra data is always correct because writes are idempotent. True end-to-end exactly-once across two different storage systems would require a two-phase commit, which can add significant complexity and latency for real-world benefit in this scenario.
