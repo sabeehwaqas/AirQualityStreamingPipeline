@@ -16,13 +16,13 @@
 #   Edit WINDOW_DURATION / WINDOW_SLIDE under spark-streaming, then:
 #   docker compose restart spark-streaming
 #
+#
 # TUNING (Part 2 Q5 — parallelism):
 #   Edit --master local[N] and SPARK_SHUFFLE_PARTITIONS, then:
 #   docker compose restart spark-streaming
 # =============================================================================
 
 services:
-
   # ── Kafka ──────────────────────────────────────────────────────────────────
   broker:
     image: apache/kafka:3.7.2
@@ -56,7 +56,11 @@ services:
       - CASSANDRA_DC=datacenter1
       - CASSANDRA_RACK=rack1
     healthcheck:
-      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' localhost 2>/dev/null | grep -q system"]
+      test:
+        [
+          "CMD-SHELL",
+          "cqlsh -e 'DESCRIBE KEYSPACES' localhost 2>/dev/null | grep -q system",
+        ]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -157,7 +161,12 @@ services:
     image: apache/spark:3.5.5-scala2.12-java17-python3-ubuntu
     container_name: spark-master
     user: root
-    entrypoint: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh && tail -f /opt/spark/logs/*"]
+    entrypoint:
+      [
+        "/bin/bash",
+        "-c",
+        "/opt/spark/sbin/start-master.sh && tail -f /opt/spark/logs/*",
+      ]
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -172,7 +181,12 @@ services:
     image: apache/spark:3.5.5-scala2.12-java17-python3-ubuntu
     container_name: spark-worker
     user: root
-    entrypoint: ["/bin/bash", "-c", "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f /opt/spark/logs/*"]
+    entrypoint:
+      [
+        "/bin/bash",
+        "-c",
+        "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f /opt/spark/logs/*",
+      ]
     depends_on:
       - spark-master
 
@@ -198,8 +212,8 @@ services:
       CASSANDRA_KEYSPACE: "tenanta_analytics"
       CASSANDRA_TABLE: "window_results"
       # ── Part 2 Q3 — change window parameters here
-      WINDOW_DURATION: "5 minutes"
-      WINDOW_SLIDE: "1 minute"
+      WINDOW_DURATION: "1 minutes"
+      WINDOW_SLIDE: "30 seconds"
       WATERMARK_DELAY: "2 minutes"
       TRIGGER_INTERVAL: "30 seconds"
       # ── Alert thresholds (WHO: PM2.5=15, PM10=45 μg/m³)
