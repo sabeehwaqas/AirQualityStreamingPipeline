@@ -1,9 +1,7 @@
 AI Usage Disclosure:
 
-I declare that I have not used any AI for writing the assignment report
-I declare that I have used grammerly to fix grammer ans sentence structure in this report.
-
-_Note: Here I have done this asg as an addition to Asg 2, so i have created a new streaming analytics feature on top of the same Asg2 architecture, so some of the code,architecture diagram components and features might not be relevant for this assignment. Why? for my ease, otherwise I would had to build everything from scratch again._
+I declare that I have not used any AI for writing the assignment report itself
+I declare that I have used grammerly to fix grammer and sentence structures in this report.
 
 # Big Data Platforms - Assignment 3
 
@@ -22,6 +20,9 @@ This assignment extends the mysimbdp platform from Asg 2 with stream analytics. 
 (Diagram created using draw.io)
 
 <img src="./report-img/BDF-Asg3-drawio.svg" alt="isolated" width="2000"/>
+
+_Note: As mentioned,I have done this asg as an addition to Asg 2, so i have created a new streaming analytics feature on top of the same Asg2 architecture, so some of the code,architecture diagram components and features might not be relevant for this assignment.
+Why? for my ease, otherwise I would had to build everything from scratch again._
 
 ---
 
@@ -200,7 +201,7 @@ The diagram below shows the full system. The left side is reused from Asg 2 (Kaf
 
 ### P2.1 - Schemas, Serialization, and Processing Logic
 
-**Input schema** (matches `tenantA_producer.py` flat JSON exactly):
+**Input schema** (matches `tenantA_producer.py` flat JSON exactly (same as Asg 2):
 
 ```python
 INPUT_SCHEMA = StructType([
@@ -227,11 +228,11 @@ avg_pm25 double, avg_pm10 double, max_pm25 double, max_pm10 double,
 record_count bigint, alert_fired boolean
 ```
 
-**Why enforce schemas:** Without a fixed schema, PySpark's `from_json` would guess the field types at runtime. A single bad record could make `pm2_5_P2` from a number to a string, which can break all the averages afterwards. Defining the schema also acts as a contract between the tenant and the platform, both sides know exactly what to send and what to expect, which makes the system much easier if something goes wrong.
+**Why enforce schemas:** Without a fixed schema, PySpark's `from_json` would guess the field data types when running. A single bad record could make `pm2_5_P2` from a number to a string, which can break everything later in pipeline. Defining the schema also acts as a contract between the tenant and the platform, both sides know exactly what to send and what to expect, which makes the system much easier if something goes wrong.
 
 **Serialization and deserialization:** Records arrive from Kafka as raw bytes. The job reads them with `from_json(col("value").cast("string"), INPUT_SCHEMA)`, bytes to string to structured columns. Alert messages going back out to Kafka are serialized with `to_json(struct(...))`. Cassandra writes go through the Spark-Cassandra connector which handles the type mapping automatically.
 
-**Processing logic steps:**
+**Processing steps:**
 
 1. Read raw bytes from Kafka using `readStream`
 2. Cast the `value` column from bytes to string and parse it with `from_json` using `INPUT_SCHEMA`
@@ -243,7 +244,7 @@ record_count bigint, alert_fired boolean
 8. Add `alert_fired` boolean: `True` when `avg_pm25 > 15.0` OR `avg_pm10 > 45.0`
 9. Write via `writeStream` with `outputMode("update")` and `foreachBatch(write_batch)`
 
-**How results get back to the tenant in near real time:** Inside `write_batch()`, after writing everything to Cassandra, the code filters for rows where `alert_fired = True` and publishes those as JSON messages to `tenantA.alerts`. The tenant's `alert_consumer.py` is subscribed to this topic and gets the alert within one trigger cycle — 30 seconds at most from when the window was last updated. The trigger interval is configurable via the `TRIGGER_INTERVAL` environment variable in docker-compose.
+**How results get back to the tenant in near real time:** Inside `write_batch()`, after writing everything to Cassandra, the code filters for rows where `alert_fired = True` and publishes those as JSON messages to `tenantA.alerts`. The tenant's `alert_consumer.py` uses this topic and gets the alert within one trigger cycle i.e. 30 seconds at most from when the window was last updated. The trigger interval can be managed via the `TRIGGER_INTERVAL` environment variable in docker-compose.
 
 ---
 
