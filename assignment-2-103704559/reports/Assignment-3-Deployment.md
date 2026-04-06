@@ -1,4 +1,4 @@
-# mysimbdp Assignment 3 — Deployment Guide
+# mysimbdp Assignment 3 - Deployment Guide
 
 ## Folder structure
 
@@ -49,9 +49,9 @@ pip install confluent-kafka requests
 
 ---
 
-## Every fresh start — full sequence
+## Every fresh start - full sequence
 
-### Step 1 — Clean wipe
+### Step 1 - Clean wipe
 
 Always do this before a fresh start to avoid stale schema/data issues:
 
@@ -61,7 +61,7 @@ docker compose down -v
 docker rmi mysimbdp-platform:latest 2>/dev/null || true
 ```
 
-### Step 2 — Bootstrap (does everything)
+### Step 2 - Bootstrap (does everything)
 
 ```bash
 ./bootstrap.sh
@@ -77,15 +77,15 @@ This script does the following automatically:
 6. Creates all Cassandra keyspaces and tables (Asg2 + Asg3 schemas)
 7. Auto-starts `streamingestworker` for tenantA and tenantB via API call
 
-Wait for `✅ Bootstrap complete.` — takes 5–10 minutes on first run (image downloads).
+Wait for `✅ Bootstrap complete.` - takes 5–10 minutes on first run (image downloads).
 
-### Step 3 — Verify all containers are running
+### Step 3 - Verify all containers are running
 
 ```bash
 docker compose ps
 ```
 
-Expected output — all containers `running`:
+Expected output - all containers `running`:
 
 ```
 NAME                    STATUS
@@ -102,7 +102,7 @@ spark-streaming         running
 tenant-alert-consumer   running
 ```
 
-### Step 4 — Verify pipeline is flowing
+### Step 4 - Verify pipeline is flowing
 
 ```bash
 # Confirm Kafka is receiving sensor data
@@ -127,19 +127,19 @@ docker exec -it cqlsh cqlsh cassandra 9042 \
 
 ## Running the assignment tests
 
-### Part 2 Q3 — Speed tests (run from host machine)
+### Part 2 Q3 - Speed tests (run from host machine)
 
 ```bash
-# Slow — 1 msg/sec for 60 seconds
+# Slow - 1 msg/sec for 60 seconds
 python streaming/speed_test.py --speed slow --duration 60
 
-# Medium — 10 msg/sec
+# Medium - 10 msg/sec
 python streaming/speed_test.py --speed medium --duration 60
 
-# Fast — 100 msg/sec
+# Fast - 100 msg/sec
 python streaming/speed_test.py --speed fast --duration 60
 
-# Flood — max speed
+# Flood - max speed
 python streaming/speed_test.py --speed flood --duration 30
 ```
 
@@ -151,7 +151,7 @@ docker exec -it cqlsh cqlsh cassandra 9042 \
       FROM tenanta_analytics.window_results LIMIT 20;"
 ```
 
-### Part 2 Q3 — Window parameter change
+### Part 2 Q3 - Window parameter change
 
 Edit `docker-compose.yaml` under `spark-streaming` environment:
 
@@ -171,7 +171,7 @@ Then restart just Spark:
 docker compose restart spark-streaming
 ```
 
-### Part 2 Q4 — Error injection
+### Part 2 Q4 - Error injection
 
 ```bash
 # Inject 10 of each error type
@@ -181,7 +181,7 @@ python streaming/inject_errors.py --errors-per-type 10
 docker logs -f spark-streaming | grep "batch\|write\|ERROR"
 ```
 
-### Part 2 Q5 — Parallelism tests
+### Part 2 Q5 - Parallelism tests
 
 Edit `docker-compose.yaml` under `spark-streaming`:
 

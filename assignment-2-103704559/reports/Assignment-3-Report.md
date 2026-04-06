@@ -12,6 +12,7 @@
 **Tech stack:** Apache Kafka (messaging), PySpark Structured Streaming (stream processing), Cassandra (mysimbdp-coredms), Python, Docker Compose.
 
 **Architecture diagram:**
+(Diagram created using draw.io)
 <img src="./report-img/BDF-Asg3-drawio.svg" alt="isolated" width="2000"/>
 
 ---
@@ -20,24 +21,25 @@
 
 ### P1.1 - Dataset and Scenario
 
-**Dataset:** sensor.community open air quality API ('https://github.com/opendata-stuttgart/meta/wiki/EN-APIs'). This API returns a rolling snapshot of readings from approx. 15,000 citizen owned air quality sensors worldwide. Each record contains a sensor identifier, geographic location (lat/lon/country), and particulate matter measurements (PM2.5 as P2, PM10 as P1) from sensors like the SDS011.(info source )
+**Dataset:** sensor.community open air quality API ('https://github.com/opendata-stuttgart/meta/wiki/EN-APIs'). This API returns a rolling snapshot of readings from approx. 15,000 citizen owned air quality sensors worldwide. Each record contains a sensor identifier, geographic location (lat/lon/country), and particulate matter measurements (PM2.5 as P2, PM10 as P1) from sensors like the SDS011.
+(information source: https://github.com/opendata-stuttgart/meta/wiki/EN-APIs)
 
-**Why suitable for streaming analytics:** The API updates every 5 minutes with new sensor readings from thousands of globally distributed sensors. This is a continuous, high volume, geographically distributed data source. Air quality is now becoming a big concern due to high air polution and health hazards, In my preivous soltuion (Asg 2) the air quality data was being stored in cassandra table as batch of 5 min. But these air polutents sometimes needs to be identified quickly and not wait 5 mins, specially in sensative areas like hospitals, schools, research labs or areas near active natural disasters like volcanos or hurricans. In such cases a streaming analystics soltuion needs to be designed to alert the tenant asap.
+**Why suitable for streaming analytics:** The API (data source) updates every few minutes with new sensor readings from thousands of globally distributed sensors. This is a continuous, high volume, geographically distributed data source. Air quality is now becoming a big concern due to high air polution and health hazards, In my preivous solution (Asg 2) the air quality data was being stored in cassandra table as batch process every 5 min. But these air polutents sometimes needs to be identified quickly, specially in sensative areas like hospitals, schools, research labs or areas near active natural disasters like volcanos or hurricans. In such cases a streaming analystics solution needs to be designed to alert the tenant ASAP.
 
-**Scenario:** TenantA is a public health monitoring service. They stream raw sensor readings into the platform in near real-time. The 'streamanalyticsapp' computes rolling average PM2.5 and PM10 concentrations per country over sliding 1 minute windows. When the average PM2.5 in a country exceeds 15 μg/m^3 (WHO 24h guideline) or PM10 exceeds 45 μg/m^3, an alert is fired back to the tenant immediately.
+**Scenario:** TenantA is a public health monitoring service. They stream raw sensor readings into the platform in near real time. The 'streamanalyticsapp' computes rolling average PM2.5 and PM10 concentrations per country over sliding 1 minute windows. When the average PM2.5 in a country exceeds 15 μg/m^3 (WHO 24h guideline) or PM10 exceeds 45 μg/m^3, an alert is fired back to the tenant immediately.
 
-**streamanalyticsapp functionality:**
+**streamanalyticsapp:**
 
 - Consumes from Kafka topic 'tenantA.bronze.raw'
 - Groups records by country and 1 minute sliding window (slides every 30 seconds)
 - Computes avg PM2.5, avg PM10, max PM2.5, max PM10, record count per window
 - Flags windows where either threshold is breached ('alert_fired = True')
-- Writes all window results to Cassandra keyspace 'tenanta_analytics', table 'window_results'
-- Publishes alert JSON to Kafka topic 'tenantA.alerts' for near-real-time tenant notification
+- Writes all window results to Cassandra keyspace 'tenanta_analytics' in table 'window_results'
+- Pushes the alert JSON to Kafka topic 'tenantA.alerts' for real time tenant notification
 
 **Data sink in mysimbdp-coredms (Cassandra):**
 
-'''
+```sql
 tenanta_analytics.window_results
 country text <- partition key
 window_start timestamp <- clustering key (DESC)
@@ -48,27 +50,31 @@ max_pm25 double
 max_pm10 double
 record_count bigint
 alert_fired boolean
-'''
+```
 
-Partition key is 'country' so all windows for the same country are co located on the same Cassandra node, making per country range queries efficient.
+Partition key is 'country' so all windows for the same country are located on the same Cassandra node, making per country queries efficient.
 
 ---
 
 ### P1.2 - Keyed vs Non-Keyed Streams and Message Delivery Guarantees
 
-**Keyed stream:** The stream is keyed by 'country'. In the Kafka producer, messages are partitioned by 'sensor_id' (ensuring all readings from the same sensor go to the same partition, preserving sensor ordering). In PySpark, the windowed aggregation groups by '(window, country)', making it effectively keyed on country for analytics purposes.
+**Keyed stream:**
+
+- The stream is keyed by 'country'.
+- In the Kafka producer, messages are partitioned by 'sensor_id' (making all readings from the same sensor go to the same partition).
+- In PySpark, the windowed aggregation groups by '(window, country)', making it effectively keyed on country for analytics purposes.
 
 Keying by country is used because:
 
 - The analytics goal is per country air quality averages, not per sensor
 - It distributes processing across Spark tasks evenly (many countries, many sensors per country)
-- Cassandra is also partitioned by country, so writes are efficient
+- Cassandra is also partitioned by country, so writes are quick.
 
 Example key assignment: a reading from sensor '78901' in Finland ('country=FI') is keyed to partition 'hash(78901) % 6' in Kafka, and contributes to the 'FI' window group in Spark.
 
-**Message delivery guarantees:** At-least-once delivery is appropriate and enough for this scenario. The producer uses 'enable.idempotence=True' and 'acks=all' which provides exactly-once delivery at the producer level within a single Kafka session. On the consumer (Spark) side, 'foreachBatch' with checkpointing provides at-least-once semantics, if a batch fails and retries, some window results may be recomputed and re-written to Cassandra, but since Cassandra writes use the same primary key '(country, window_start)' the result is idempotent (same row gets overwritten with the same data).
+**Message delivery guarantees:** At-least-once delivery is appropriate here for this scenario. The producer has 'enable.idempotence=True' and 'acks=all' which provides exactly-once delivery at the producer level within a single Kafka session. On the consumer (Spark) side, 'foreachBatch' with checkpointing provides at-least-once, if a batch fails and retries, some window results can be reprocessed and rewritten to Cassandra easily, but since Cassandra writes use the same primary key '(country, window_start)' the result is idempotent (same row gets overwritten with the same data).
 
-Exactly-once end-to-end would need Kafka transactions and two-phase commit with Cassandra, which adds much complexity. For a public health monitoring scenario, at-least-once is nice: a duplicate alert is far less harmful than a missed alert.
+Exactly-once end-to-end would need Kafka transactions and two-phase commit with Cassandra, which add much complexity. For a public health monitoring scenario of mine, at-least-once is nice as a duplicate alert is far less harmful than a missed alert.
 
 ---
 
@@ -78,31 +84,39 @@ Exactly-once end-to-end would need Kafka transactions and two-phase commit with 
 
 - We want to know the air quality at a specific point in time, not when it arrived in the platform
 - Sensor readings may be delayed by network latency, API polling intervals, or Kafka lag
-- Using processing time would cause readings from the same measurement period to fall into different windows depending on when they happened to arrive
+- Using processing time would cause readings from the same measurement period to fall into different windows depending on when they are to arrive
 
-If a record has no timestamp, the solution can be to use 'kafka_ts' (the Kafka broker timestamp, which is processing time) as a best-effort substitute.
+If a record has no timestamp, another solution can be to use 'kafka_ts' (the Kafka broker timestamp, which is processing time).
 
 **Window type and parameters:**
 
-**Sliding window**: 1-minute duration, sliding every 30 seconds
+**Sliding window**: 1 minute duration, sliding every 30 seconds
 
 - This means each record contributes to 2 overlapping windows simultaneously
-- A 1-minute window gives fine-grained temporal resolution, making it suitable for detecting rapidly developing pollution events — a PM2.5 spike is visible within 1 minute of occurring rather than being averaged across 5 minutes
-- Sliding by 30 seconds means a new window result is emitted every 30 seconds, matching the Spark trigger interval and providing near real-time updates to the tenant
-- The tradeoff is lower `record_count` per window compared to a wider window i.e. each window captures fewer sensor readings, so averages are noisier and more sensitive to individual sensor spikes. A wider window (e.g. 5 minutes) would produce smoother averages but increase alert latency
+
+Why 1 min and 30 sec? :
+
+- A 1 minute window gives fine grained temporal resolution, making it suitable for detecting quick change in pollution, also a polutent spike is visible more within 1 minute of occurring rather than being averaged across 5 minutes
+- Sliding by 30 seconds makes it good enough to catch rapid changes.
+
+The trigger interval is also 30 seconds, so Spark wakes up and processes a new batch at the same frequency the window slides — meaning results are emitted as fresh as possible.
+
+Tradeoff:
+
+- The tradeoff is lower `record_count` per window compared to a wider window i.e. each window captures fewer sensor readings, so averages are noisier and more sensitive to individual sensor spikes. A wider window (e.g. 5 minutes) makes smoother averages but increase alert latency.
 
 Window function used: `groupBy(window(event_time, "1 minute", "30 seconds"), country)` with aggregation functions `avg`, `max`, `count`.
 
-**Alternative tested**: 5-minute sliding window (`WINDOW_DURATION=5 minutes`, `WINDOW_SLIDE=1 minute`) it produces fewer rows with higher `record_count` per window, smoother averages, but higher alert latency.
+**Alternative tested**: 5 minute sliding window (`WINDOW_DURATION=5 minutes`, `WINDOW_SLIDE=1 minute`) it produces fewer rows with higher `record_count` per window, smoother averages, but higher alert latency.
 
 **Out-of-order data causes:**
 
-- The sensor.community API is polled every 0.5 seconds but the API itself only updates every 5 minutes. Records for the same measurement window may arrive spread across multiple API polls.
-- Network latency between the sensor and the community server varies per sensor
-- The producer's deduplication logic may delay some records by a poll cycle
-- Kafka consumer lag when 'spark-streaming' starts or restarts
+- API updates every 5 minutes but is polled every 0.5 seconds, so records for the same window arrive spread across multiple polls
+- Network latency varies per sensor
+- Producer deduplication may delay records by one poll cycle
+- Kafka consumer lag on restart
 
-**Watermark:** A 2-minute watermark is used ('withWatermark("event_time", "2 minutes")'). This tells Spark to wait up to 2 minutes for late records before closing a window and emitting results. The choice of 2 minutes balances:
+**Watermark:** 2 minutes. Important note on actual latency: because the watermark is 2 minutes, Spark will not emit the final result for a window until window_end + 2 minutes. So worst-case end-to-end alert latency is approximately 2.5 minutes (1-minute window + 2-minute watermark + one trigger cycle), not 30 seconds. The choice of 2 minutes balances:
 
 - Covering typical API polling delays (< 1 minute)
 - Not holding state in memory too long (larger watermark = more state)
@@ -118,7 +132,8 @@ Watermarks are necessary because without them Spark would hold all window state 
 
 - _Definition:_ Time from the sensor measurement timestamp to when the alert is published to 'tenantA.alerts'
 - _How to measure:_ Compare 'timestamp' field in the Kafka message with 'alert_ts' field in the alert JSON. Can be logged in 'write_batch()' function
-- _Importance:_ For public health alerting, low latency is critical. The platform SLA should guarantee alerts within N minutes of a threshold breach. Relevant to: tenant (SLA), platform operator (capacity planning)
+- _Expected range_: Best case approx. 30 seconds (one trigger cycle after window closes). Worst case approx. 2.5 minutes (1 minute window duration + 2 minute watermark delay + one 30 second trigger cycle)
+- _Importance:_ For public health alerting, low latency is critical. The 2 minute watermark is the dominant factor it reduces its speeds up alerts but risks dropping late arriving records. Relevant to: tenant (SLA), platform operator (capacity planning)
 
 **2. Micro-batch processing time**
 
@@ -154,8 +169,6 @@ Old reused Architeture
 <img src="./report-img/mysimbdp_architecture-2.svg" alt="isolated" width="20000"/>
 
 New Architecure which incluses a new Kafka alert Topic , Apache Apark and New cassadnra Keyspace and table, tenant alert python consumer.
-
-<img src="./report-img/BDF-Asg3-drawio-streamonly.svg" alt="isolated" width="20000"/>
 
 Full Combined architecture
 <img src="./report-img/BDF-Asg3-drawio.svg" alt="isolated" width="2000"/>
